@@ -1,4 +1,3 @@
-// main.js
 import { app, BrowserWindow, ipcMain, screen } from "electron";
 import OSC from "osc";
 import { fileURLToPath, pathToFileURL } from "node:url";
