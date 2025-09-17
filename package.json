@@ -1,0 +1,21 @@
+{
+  "name": "tangibletable",
+  "version": "1.0.0",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "electron ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "cross-env": "^10.0.0",
+    "electron": "^38.1.0"
+  },
+  "dependencies": {
+    "osc": "^2.4.5"
+  }
+}
