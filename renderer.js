@@ -61,11 +61,7 @@ const LINKS = [
   });
 })();
 
-// Close via ESC handled in main; expose a manual close if you want from UI:
-// window.actions.closeSiteView();
-
-// ------- TUIO drawing (unchanged) -------
-const normId  = (v) => String(v);
+// ------- TUIO drawing -------
 const toDeg   = (rad) => ((rad * 180) / Math.PI + 360) % 360;
 const roundPx = (n)  => Math.round(n);
 const cursors  = new Map();
@@ -73,21 +69,22 @@ const objects  = new Map();
 
 window.appState?.onInit?.(({ titleText }) => { if (titleEl) titleEl.textContent = titleText || "Display"; });
 
+// FIXED-RESIZE: lock canvas buffer to CSS size (no DPR scaling)
 function resize() {
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width  = Math.floor(canvas.clientWidth * dpr);
-  canvas.height = Math.floor(canvas.clientHeight * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  canvas.width  = canvas.clientWidth;   // CHANGED: no * devicePixelRatio
+  canvas.height = canvas.clientHeight;  // CHANGED
+  ctx.setTransform(1, 0, 0, 1, 0, 0);   // CHANGED: reset to 1:1
 }
 window.addEventListener("resize", resize);
 resize();
 
 function normToPixels(nx, ny) {
-  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const w = canvas.width, h = canvas.height; // CHANGED: use actual buffer size
   return { px: nx * w, py: (1 - ny) * h };
 }
+
 function draw() {
-  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const w = canvas.width, h = canvas.height; // CHANGED
   ctx.clearRect(0, 0, w, h);
 
   objects.forEach((o) => {

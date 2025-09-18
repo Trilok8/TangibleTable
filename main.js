@@ -6,18 +6,19 @@ import { dirname, join } from "node:path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = dirname(__filename);
 
-// Your tracker sends TUIO to this port
 const TUIO_PORT = parseInt(process.env.TUIO_PORT || "3333", 10);
 
-// Track windows (one per display)
 const windowsByDisplayId = new Map();
 const windowsByIndex     = new Map();
+const viewByWinId        = new Map();
 
-// Track an attached BrowserView per window (to open/close/resize)
-const viewByWinId = new Map(); // win.id -> { view: BrowserView, w: number, h: number }
+// --- Mirror state ---
+let mirrorTimer = null;
+let mirrorFPS   = 15;
+let mirrorRect  = null;
 
 function createWindowOnDisplay(display, index) {
-  const preloadPath = join(__dirname, "preload.js"); // ESM preload (sandbox:false)
+  const preloadPath = join(__dirname, "preload.js");
   const { bounds, id: displayId } = display;
 
   const win = new BrowserWindow({
@@ -28,16 +29,15 @@ function createWindowOnDisplay(display, index) {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,              // ESM preload requires sandbox:false
+      sandbox: false,
     }
   });
 
-  // First screen -> gradient; others -> tags app
+  // index 0 = gradient screen, others = tags app
   const fileToLoad = index === 0 ? "gradient.html" : "index.html";
   const url = pathToFileURL(join(__dirname, fileToLoad)).href + `?displayId=${displayId}&idx=${index}`;
   win.loadURL(url);
 
-  // Open devtools only on the gradient window (optional)
   if (index === 0) {
     win.webContents.once("did-finish-load", () => {
       if (!win.webContents.isDevToolsOpened()) {
@@ -46,7 +46,6 @@ function createWindowOnDisplay(display, index) {
     });
   }
 
-  // Recenter BrowserView if present on move/resize/fullscreen changes
   const recenter = () => {
     const rec = viewByWinId.get(win.id);
     if (!rec) return;
@@ -61,7 +60,7 @@ function createWindowOnDisplay(display, index) {
   win.on("enter-full-screen", recenter);
   win.on("leave-full-screen", recenter);
 
-  // ESC closes BrowserView if any
+  // ESC closes BrowserView
   win.webContents.on("before-input-event", (_e, input) => {
     if (input.key?.toLowerCase() === "escape") {
       closeSiteView(win);
@@ -71,7 +70,6 @@ function createWindowOnDisplay(display, index) {
   windowsByDisplayId.set(displayId, win);
   windowsByIndex.set(index, win);
   win.on("closed", () => {
-    // Clean up any view
     closeSiteView(win);
     windowsByDisplayId.delete(displayId);
     windowsByIndex.delete(index);
@@ -130,7 +128,7 @@ function startTuioReceiver() {
 
 /* -------------------- BrowserView helpers -------------------- */
 function openSiteView(win, url, W = 1280, H = 720) {
-  closeSiteView(win); // ensure only one view
+  closeSiteView(win); // ensure only one
 
   const view = new BrowserView({
     webPreferences: {
@@ -149,14 +147,20 @@ function openSiteView(win, url, W = 1280, H = 720) {
   view.setBounds({ x, y, width: W, height: H });
   view.setAutoResize({ width: false, height: false });
 
-  // Load URL
+  // IMPORTANT: subscribe to 'did-finish-load' BEFORE navigation to avoid missing it
+  view.webContents.once("did-finish-load", () => {
+    mirrorRect = null;       // full view
+    startMirrorLoop();       // only start after the page is fully ready
+  });
+
+  // Navigate
   view.webContents.loadURL(url).catch(() => {
-    // In case of navigation error, close it silently
     closeSiteView(win);
   });
 }
 
 function closeSiteView(win) {
+  stopMirrorLoop();
   const rec = viewByWinId.get(win.id);
   if (!rec) return;
   try {
@@ -181,3 +185,41 @@ ipcMain.handle("close-site-view", async (evt) => {
   closeSiteView(sender);
   return true;
 });
+
+// Mirror control from gradient renderer (optional overrides)
+ipcMain.handle("mirror:start", async (_e, { rect, fps }) => {
+  mirrorRect = rect || null;
+  mirrorFPS  = fps || 15;
+  await startMirrorLoop();
+  return true;
+});
+ipcMain.handle("mirror:stop", async () => { stopMirrorLoop(); return true; });
+
+/* -------------------- Mirror loop -------------------- */
+function getGradientWindow() { return windowsByIndex.get(0); } // first display is gradient
+function getSourceView() {
+  // Single active BrowserView stored in viewByWinId
+  const candidates = [...viewByWinId.values()];
+  return candidates.length ? candidates[0].view : null;
+}
+async function startMirrorLoop() {
+  stopMirrorLoop();
+  const dstWin = getGradientWindow();
+  const srcView = getSourceView();
+  if (!dstWin || dstWin.isDestroyed() || !srcView) return;
+
+  const fps = Math.min(Math.max(mirrorFPS || 15, 1), 30);
+  const interval = Math.floor(1000 / fps);
+
+  mirrorTimer = setInterval(async () => {
+    try {
+      const img = await srcView.webContents.capturePage(mirrorRect || null);
+      if (!dstWin.isDestroyed()) dstWin.webContents.send("mirror:frame", img.toDataURL());
+    } catch {
+      // ignore transient capture errors (during nav/minimize)
+    }
+  }, interval);
+}
+function stopMirrorLoop() {
+  if (mirrorTimer) { clearInterval(mirrorTimer); mirrorTimer = null; }
+}
