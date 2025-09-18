@@ -2,125 +2,106 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Tangible Table</title>
+    <title>Tags App</title>
+    <!-- Allow loading public sites in the iframe -->
     <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' data:; frame-src https:; script-src 'self'; style-src 'self' 'unsafe-inline'">
+      content="default-src 'self';
+               img-src 'self' data:;
+               frame-src https:;
+               script-src 'self';
+               style-src 'self' 'unsafe-inline'">
     <style>
       html, body { margin:0; height:100%; background:#0e0f12; color:#eaeaea; font-family:system-ui; }
-      #hud { position:fixed; top:10px; left:10px; background:#1b1e24; padding:8px 12px; border-radius:8px; font-size:14px; opacity:0.9; z-index:10; }
-      .pill { display:inline-block; background:#2b2f38; padding:3px 8px; border-radius:999px; margin-left:8px; }
       canvas { display:block; width:100vw; height:100vh; }
 
-      /* Right-side toolbar */
-      #toolbar {
-        position: fixed;
-        right: 12px;
-        top: 50%;
-        transform: translateY(-50%);
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        z-index: 30;
+      /* Title bar */
+      #titlebar {
+        position: fixed; top:0; left:0; right:0; height:36px;
+        background:#1b1e24; border-bottom:1px solid #3a404c;
+        color:#eaeaea; display:flex; align-items:center; padding:0 12px;
+        z-index:30; font-size:13px;
       }
-      .tb-btn {
-        min-width: 180px;
-        padding: 10px 14px;
-        border-radius: 8px;
-        background: #2b2f38;
-        border: 1px solid #3a404c;
-        color: #eaeaea;
-        cursor: pointer;
-        text-align: center;
-        font-weight: 600;
-        letter-spacing: .2px;
-      }
-      .tb-btn:hover { background: #343a46; }
-      .tb-btn:active { background: #3d4452; }
 
-      /* Overlay for embedded website (primary window only) */
+      /* TUIO HUD */
+      #hud {
+        position:fixed; top:40px; left:10px;
+        background:#1b1e24; padding:8px 12px; border-radius:8px;
+        font-size:14px; opacity:0.95; z-index:20; pointer-events:none;
+      }
+      .pill { display:inline-block; background:#2b2f38; padding:3px 8px; border-radius:999px; margin-left:8px; }
+
+      /* Right-side list of links */
+      #toolbar {
+        position: fixed; right:12px; top:50%; transform:translateY(-50%);
+        display:flex; flex-direction:column; gap:10px; z-index:40;
+        width: 340px; max-height: 70vh;
+      }
+      #link-list {
+        border:1px solid #3a404c; border-radius:10px; padding:10px;
+        background:#1b1e24; overflow:auto; max-height:70vh;
+      }
+      .link-btn {
+        width:100%; text-align:left; padding:10px 12px; margin:6px 0;
+        background:#2b2f38; border:1px solid #3a404c; color:#eaeaea;
+        border-radius:8px; cursor:pointer; font-size:13px;
+        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      }
+      .link-btn:hover { background:#343a46; }
+      .link-btn:active{ background:#3d4452; }
+
+      /* 1280×720 overlay iframe */
       #site-overlay {
-        position: fixed;
-        left: 50%;
-        top: 50%;
-        width: 1280px;
-        height: 720px;
-        transform: translate(-50%, -50%);
-        background: #000;
-        border: 2px solid #3a404c;
-        border-radius: 10px;
-        box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-        display: none; /* hidden until used */
-        z-index: 25;
-        overflow: hidden;
+        position:fixed; left:50%; top:50%;
+        width:1280px; height:720px; transform:translate(-50%,-50%);
+        background:#000; border:2px solid #3a404c; border-radius:10px;
+        box-shadow:0 20px 50px rgba(0,0,0,.5); display:none; z-index:35; overflow:hidden;
       }
       #site-overlay header {
-        position: absolute;
-        top: 0; left: 0; right: 0;
-        height: 36px;
-        background: #1b1e24;
-        border-bottom: 1px solid #3a404c;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 10px;
-        color: #eaeaea;
-        font-size: 12px;
+        position:absolute; top:0; left:0; right:0; height:36px;
+        background:#1b1e24; border-bottom:1px solid #3a404c;
+        display:flex; align-items:center; justify-content:space-between;
+        padding:0 10px; color:#eaeaea; font-size:12px;
       }
+      #site-title { max-width: 70%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       #site-close {
-        background: #2b2f38;
-        border: 1px solid #3a404c;
-        color: #eaeaea;
-        border-radius: 6px;
-        padding: 4px 8px;
-        cursor: pointer;
+        background:#2b2f38; border:1px solid #3a404c; color:#eaeaea;
+        border-radius:6px; padding:4px 8px; cursor:pointer;
       }
       #site-frame {
-        position: absolute;
-        top: 36px; left: 0; right: 0; bottom: 0;
-        width: 100%;
-        height: calc(100% - 36px);
-        border: 0;
+        position:absolute; top:36px; left:0; right:0; bottom:0;
+        width:100%; height:calc(100% - 36px); border:0; background:#000;
       }
 
-      /* Badge to show if this is primary window */
-      #badge {
-        position: fixed;
-        top: 10px;
-        right: 10px;
-        background: #263145;
-        color: #d8dee9;
-        padding: 6px 10px;
-        border-radius: 999px;
-        font-size: 12px;
-        border: 1px solid #3a404c;
-        z-index: 15;
-        opacity: 0.9;
-      }
+      /* Fallback (only shown if a site blocks iframe; kept minimal) */
+      .blocked { color:#eaeaea; display:flex; align-items:center; justify-content:center; height:100%; font-family:system-ui; }
+      .blocked a { color:#8ab4f8; text-decoration:none; }
     </style>
   </head>
   <body>
-    <div id="hud">TUIO <span class="pill" id="counts">obj:0 cur:0</span></div>
+    <div id="titlebar">Display</div>
 
-    <!-- Primary/Secondary badge -->
-    <div id="badge">Secondary</div>
-
-    <!-- Right-side toolbar (visible on all screens; actions affect the primary screen) -->
-    <div id="toolbar">
-      <button id="btn-site-1" class="tb-btn">Open Site 1 (in Primary)</button>
-      <button id="btn-site-2" class="tb-btn">Open Site 2 (in Primary)</button>
-      <button id="btn-swap"   class="tb-btn">Swap Screens</button>
+    <div id="hud">
+      TUIO
+      <span id="counts" class="pill">obj:0 cur:0</span>
+      <span id="lastosc" class="pill">last: —</span>
     </div>
 
-    <!-- Embedded website overlay (only shown on the PRIMARY window when commanded) -->
+    <!-- URL list -->
+    <div id="toolbar">
+      <div id="link-list"></div>
+    </div>
+
+    <!-- In-app website overlay (iframe) -->
     <div id="site-overlay">
       <header>
         <span id="site-title">Embedded Site</span>
         <button id="site-close">Close</button>
       </header>
-      <iframe id="site-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"></iframe>
+      <iframe id="site-frame"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"></iframe>
     </div>
 
     <canvas id="stage"></canvas>
-    <script src="./renderer.js"></script>
+    <script src="./renderer.js" defer></script>
   </body>
 </html>
