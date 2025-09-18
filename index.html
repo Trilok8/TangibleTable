@@ -3,13 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <title>Tags App</title>
-    <!-- Allow loading public sites in the iframe -->
     <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self';
-               img-src 'self' data:;
-               frame-src https:;
-               script-src 'self';
-               style-src 'self' 'unsafe-inline'">
+      content="default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'">
     <style>
       html, body { margin:0; height:100%; background:#0e0f12; color:#eaeaea; font-family:system-ui; }
       canvas { display:block; width:100vw; height:100vh; }
@@ -22,7 +17,7 @@
         z-index:30; font-size:13px;
       }
 
-      /* TUIO HUD */
+      /* HUD */
       #hud {
         position:fixed; top:40px; left:10px;
         background:#1b1e24; padding:8px 12px; border-radius:8px;
@@ -30,11 +25,11 @@
       }
       .pill { display:inline-block; background:#2b2f38; padding:3px 8px; border-radius:999px; margin-left:8px; }
 
-      /* Right-side list of links */
+      /* Right-side scrollable list of links */
       #toolbar {
         position: fixed; right:12px; top:50%; transform:translateY(-50%);
         display:flex; flex-direction:column; gap:10px; z-index:40;
-        width: 340px; max-height: 70vh;
+        width: 360px; max-height: 70vh;
       }
       #link-list {
         border:1px solid #3a404c; border-radius:10px; padding:10px;
@@ -49,32 +44,8 @@
       .link-btn:hover { background:#343a46; }
       .link-btn:active{ background:#3d4452; }
 
-      /* 1280×720 overlay iframe */
-      #site-overlay {
-        position:fixed; left:50%; top:50%;
-        width:1280px; height:720px; transform:translate(-50%,-50%);
-        background:#000; border:2px solid #3a404c; border-radius:10px;
-        box-shadow:0 20px 50px rgba(0,0,0,.5); display:none; z-index:35; overflow:hidden;
-      }
-      #site-overlay header {
-        position:absolute; top:0; left:0; right:0; height:36px;
-        background:#1b1e24; border-bottom:1px solid #3a404c;
-        display:flex; align-items:center; justify-content:space-between;
-        padding:0 10px; color:#eaeaea; font-size:12px;
-      }
-      #site-title { max-width: 70%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      #site-close {
-        background:#2b2f38; border:1px solid #3a404c; color:#eaeaea;
-        border-radius:6px; padding:4px 8px; cursor:pointer;
-      }
-      #site-frame {
-        position:absolute; top:36px; left:0; right:0; bottom:0;
-        width:100%; height:calc(100% - 36px); border:0; background:#000;
-      }
-
-      /* Fallback (only shown if a site blocks iframe; kept minimal) */
-      .blocked { color:#eaeaea; display:flex; align-items:center; justify-content:center; height:100%; font-family:system-ui; }
-      .blocked a { color:#8ab4f8; text-decoration:none; }
+      /* Little hint footer */
+      #hint { position: fixed; bottom: 8px; right: 16px; opacity: .6; font-size: 12px; }
     </style>
   </head>
   <body>
@@ -91,15 +62,7 @@
       <div id="link-list"></div>
     </div>
 
-    <!-- In-app website overlay (iframe) -->
-    <div id="site-overlay">
-      <header>
-        <span id="site-title">Embedded Site</span>
-        <button id="site-close">Close</button>
-      </header>
-      <iframe id="site-frame"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"></iframe>
-    </div>
+    <div id="hint">Press Esc to close the site view</div>
 
     <canvas id="stage"></canvas>
     <script src="./renderer.js" defer></script>

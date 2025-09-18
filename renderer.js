@@ -3,17 +3,9 @@ const ctx      = canvas.getContext("2d");
 const titleEl  = document.getElementById("titlebar");
 const countsEl = document.getElementById("counts");
 const lastoscEl= document.getElementById("lastosc");
+const linkList = document.getElementById("link-list");
 
-// Overlay elements
-const overlay   = document.getElementById("site-overlay");
-const siteFrame = document.getElementById("site-frame");
-const siteTitle = document.getElementById("site-title");
-const siteClose = document.getElementById("site-close");
-
-// Right-hand list container
-const linkList  = document.getElementById("link-list");
-
-// Your links (as provided)
+// Your links
 const LINKS = [
   "https://siwar.ksaa.gov.sa/public-dict-information/Riyadh",
   "https://siwar.ksaa.gov.sa/public-dict-information/6a6b2873-4ad1-4a9f-89c7-1f07ccbb476d",
@@ -51,64 +43,35 @@ const LINKS = [
   "https://siwar.ksaa.gov.sa/public-dict-information/f990c2a0-f601-466f-8153-2cd35e4710a3"
 ];
 
-// Build the button list
+// Build the list
 (function buildList() {
   linkList.innerHTML = "";
   LINKS.forEach((url, idx) => {
     const btn = document.createElement("button");
     btn.className = "link-btn";
-    // show short label (last path segment) but keep full URL as title
     try {
       const u = new URL(url);
       const segs = u.pathname.split("/").filter(Boolean);
-      const label = segs[segs.length - 1] || u.host;
-      btn.textContent = `${idx + 1}. ${label}`;
+      const last = segs[segs.length - 1] || u.host;
+      btn.textContent = `${idx + 1}. ${last}`;
     } catch { btn.textContent = `${idx + 1}. ${url}`; }
     btn.title = url;
-    btn.addEventListener("click", () => showOverlay(url));
+    btn.addEventListener("click", () => window.actions?.openSiteView?.(url));
     linkList.appendChild(btn);
   });
 })();
 
-// Overlay behavior (fixed 1280×720)
-function showOverlay(url){
-  siteTitle.textContent = url;
-  overlay.style.display = "block";
-  overlay.style.width = "1280px";
-  overlay.style.height = "720px";
+// Close via ESC handled in main; expose a manual close if you want from UI:
+// window.actions.closeSiteView();
 
-  // Attempt to load; if blocked, show a minimal fallback
-  let loaded = false;
-  const watchdog = setTimeout(() => {
-    if (!loaded) {
-      siteFrame.removeAttribute("src");
-      siteFrame.srcdoc = `
-        <div class="blocked">
-          <div>
-            <div style="margin-bottom:8px;">This site refused to load in an iframe.</div>
-            <div><a href="${url}" target="_blank" rel="noreferrer noopener">Open in external browser</a></div>
-          </div>
-        </div>`;
-    }
-  }, 1500);
+// ------- TUIO drawing (unchanged) -------
+const normId  = (v) => String(v);
+const toDeg   = (rad) => ((rad * 180) / Math.PI + 360) % 360;
+const roundPx = (n)  => Math.round(n);
+const cursors  = new Map();
+const objects  = new Map();
 
-  const onLoad = () => { loaded = true; siteFrame.removeEventListener("load", onLoad); clearTimeout(watchdog); };
-  siteFrame.addEventListener("load", onLoad, { once:true });
-
-  siteFrame.srcdoc = "";  // clear any previous fallback
-  siteFrame.src = url;
-}
-function closeOverlay(){
-  overlay.style.display = "none";
-  siteFrame.removeAttribute("src");
-  siteFrame.srcdoc = "";
-  siteTitle.textContent = "Embedded Site";
-}
-siteClose?.addEventListener("click", closeOverlay);
-
-// ---------- TUIO drawing (unchanged) ----------
-const cursors  = new Map();   // id -> { sid, x, y }
-const objects  = new Map();   // sid -> { sid, id, x, y, angle }
+window.appState?.onInit?.(({ titleText }) => { if (titleEl) titleEl.textContent = titleText || "Display"; });
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
@@ -123,19 +86,16 @@ function normToPixels(nx, ny) {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   return { px: nx * w, py: (1 - ny) * h };
 }
-
 function draw() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   ctx.clearRect(0, 0, w, h);
 
-  // Objects (tags)
   objects.forEach((o) => {
     const px = o.x * w, py = (1 - o.y) * h;
     const r = Math.min(w, h) * 0.05, pad = 8;
 
     ctx.save();
     ctx.translate(px, py);
-
     ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.lineWidth = 4; ctx.strokeStyle = "#88c0d0"; ctx.stroke();
 
@@ -145,21 +105,19 @@ function draw() {
     ctx.lineWidth = 3; ctx.strokeStyle = "#81a1c1"; ctx.stroke();
     ctx.restore();
 
-    ctx.font = "14px system-ui"; ctx.fillStyle = "#e5e9f0"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+    ctx.font = "14px system-ui"; ctx.fillStyle = "#e5e9f0";
+    ctx.textAlign = "center"; ctx.textBaseline = "bottom";
     ctx.fillText(`ID:${o.id ?? o.sid}`, 0, -r - 6);
 
-    const toDeg = (rad) => ((rad * 180) / Math.PI + 360) % 360;
     const rotDeg = toDeg(o.angle || 0).toFixed(1);
     ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillStyle = "#d8dee9";
     ctx.fillText(`rot: ${rotDeg}°`, r + pad, 0);
 
     ctx.textAlign = "right";
-    ctx.fillText(`pos: ${Math.round(px)}, ${Math.round(py)}`, -r - pad, 0);
-
+    ctx.fillText(`pos: ${roundPx(px)}, ${roundPx(py)}`, -r - pad, 0);
     ctx.restore();
   });
 
-  // Cursors (dots)
   cursors.forEach((c) => {
     const { px, py } = normToPixels(c.x, c.y);
     ctx.beginPath(); ctx.arc(px, py, 12, 0, Math.PI * 2);
@@ -171,9 +129,7 @@ function draw() {
 }
 draw();
 
-// TUIO parsing (supports /tuio/2D* and /tuio2/*)
 function setLast(addr){ if (lastoscEl) lastoscEl.textContent = `last: ${addr}`; }
-
 function handleTuio1(path, args) {
   if (path === "/tuio/2Dcur") {
     const cmd = args[0];
@@ -181,7 +137,7 @@ function handleTuio1(path, args) {
       const alive = new Set(args.slice(1).map(String));
       for (const k of [...cursors.keys()]) if (!alive.has(k)) cursors.delete(k);
     } else if (cmd === "set") {
-      const sid = String(args[1]); const x = args[2], y = args[3];
+      const sid = String(args[1]); const x=args[2], y=args[3];
       cursors.set(sid, { sid, x, y });
     }
   } else if (path === "/tuio/2Dobj") {
@@ -190,12 +146,11 @@ function handleTuio1(path, args) {
       const alive = new Set(args.slice(1).map(String));
       for (const sid of [...objects.keys()]) if (!alive.has(sid)) objects.delete(sid);
     } else if (cmd === "set") {
-      const s = String(args[1]); const id = args[2], x=args[3], y=args[4], a=args[5];
+      const s = String(args[1]); const id=args[2], x=args[3], y=args[4], a=args[5];
       objects.set(s, { sid:s, id, x, y, angle:a });
     }
   }
 }
-
 function handleTuio2(path, args) {
   if (path === "/tuio2/ptr") {
     if (typeof args[0] === "string") {
@@ -217,8 +172,8 @@ function handleTuio2(path, args) {
         const alive = new Set(args.slice(1).map(String));
         for (const sid of [...objects.keys()]) if (!alive.has(sid)) objects.delete(sid);
       } else if (cmd === "set") {
-        const s  = String(args[1]); const id = args[2];
-        const x  = Number(args[3]); const y = Number(args[4]); const a = Number(args[5]) || 0;
+        const s  = String(args[1]); const id=args[2];
+        const x  = Number(args[3]); const y=Number(args[4]); const a=Number(args[5])||0;
         if (!Number.isNaN(x) && !Number.isNaN(y)) objects.set(s, { sid:s, id, x, y, angle:a });
       }
     }
@@ -229,7 +184,6 @@ function handleTuio2(path, args) {
     for (const k of [...cursors.keys()]) if (!alive.has(k)) cursors.delete(k);
   }
 }
-
 function handleOsc(msg) {
   const path = msg.address;
   const args = (msg.args || []).map(a => a.value);
@@ -237,8 +191,4 @@ function handleOsc(msg) {
   if (path.startsWith("/tuio2/")) handleTuio2(path, args);
   else if (path.startsWith("/tuio/")) handleTuio1(path, args);
 }
-
-// Hook bridge
-if (window.tuio && typeof window.tuio.onOsc === "function") {
-  window.tuio.onOsc(handleOsc);
-}
+if (window.tuio?.onOsc) window.tuio.onOsc(handleOsc);
