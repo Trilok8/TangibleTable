@@ -32,28 +32,27 @@ function createWindowOnDisplay(display, index) {
       sandbox: false,
     }
   });
+  
+  // Force the window to maximize and ensure it takes full screen
+  win.maximize();
 
   // index 0 = gradient screen, others = tags app
   const fileToLoad = index === 0 ? "gradient.html" : "index.html";
   const url = pathToFileURL(join(__dirname, fileToLoad)).href + `?displayId=${displayId}&idx=${index}`;
   win.loadURL(url);
 
-  if (index === 0) {
-    win.webContents.once("did-finish-load", () => {
-      if (!win.webContents.isDevToolsOpened()) {
-        win.webContents.openDevTools({ mode: "right" });
-      }
-    });
-  }
+  // Developer tools removed for gradient display
 
   const recenter = () => {
     const rec = viewByWinId.get(win.id);
     if (!rec) return;
+    // Recalculate dimensions based on current window content bounds
     const { width, height } = win.getContentBounds();
-    const W = rec.w ?? 1280, H = rec.h ?? 720;
-    const x = Math.max(0, Math.floor((width  - W) / 2));
-    const y = Math.max(0, Math.floor((height - H) / 2));
-    rec.view.setBounds({ x, y, width: W, height: H });
+    const browserViewWidth = Math.floor(width * 0.8); // 80% of screen width
+    const browserViewHeight = Math.floor(height * 0.8); // 80% of screen height
+    const x = 0; // Start at left edge
+    const y = Math.floor((height - browserViewHeight) / 2); // Center vertically
+    rec.view.setBounds({ x, y, width: browserViewWidth, height: browserViewHeight });
   };
   win.on("resize", recenter);
   win.on("move", recenter);
@@ -127,30 +126,129 @@ function startTuioReceiver() {
 }
 
 /* -------------------- BrowserView helpers -------------------- */
-function openSiteView(win, url, W = 1280, H = 720) {
+function openSiteView(win, url) {
+  console.log(`🔄 Main process: Opening site view for URL: ${url}`);
   closeSiteView(win); // ensure only one
 
   const view = new BrowserView({
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      webSecurity: false,
+      allowRunningInsecureContent: true
     }
   });
   win.setBrowserView(view);
-  viewByWinId.set(win.id, { view, w: W, h: H });
-
-  // Center inside content bounds
-  const { width, height } = win.getContentBounds();
-  const x = Math.max(0, Math.floor((width  - W) / 2));
-  const y = Math.max(0, Math.floor((height - H) / 2));
-  view.setBounds({ x, y, width: W, height: H });
+  console.log(`✅ Main process: BrowserView created and attached`);
+  
+  // Get window bounds and content bounds
+  const contentBounds = win.getContentBounds();
+  
+  // Use content bounds for BrowserView positioning - 80% width and height on the left
+  const { width, height } = contentBounds;
+  const browserViewWidth = Math.floor(width * 0.8); // 80% of screen width
+  const browserViewHeight = Math.floor(height * 0.8); // 80% of screen height
+  
+  // Position on the left side
+  const x = 0; // Start at left edge
+  const y = Math.floor((height - browserViewHeight) / 2); // Center vertically
+  
+  // Try a different approach - make BrowserView fill entire screen first
+  view.setAutoResize({ 
+    width: false, 
+    height: false, 
+    horizontal: false, 
+    vertical: false 
+  });
+  
+  
+  viewByWinId.set(win.id, { view, w: browserViewWidth, h: browserViewHeight });
+  view.setBounds({ x, y, width: browserViewWidth, height: browserViewHeight });
   view.setAutoResize({ width: false, height: false });
 
   // IMPORTANT: subscribe to 'did-finish-load' BEFORE navigation to avoid missing it
   view.webContents.once("did-finish-load", () => {
-    mirrorRect = null;       // full view
-    startMirrorLoop();       // only start after the page is fully ready
+    console.log('📄 Main process: Website finished loading');
+    
+    // Wait a bit for the page to fully render, then force dimensions
+    setTimeout(() => {
+      console.log('🎨 Main process: Applying CSS and JavaScript to website');
+      
+      // Force the website to fill the full BrowserView height with scrolling
+      view.webContents.insertCSS(`
+        body, html {
+          margin: 0 !important;
+          padding: 0 !important;
+          height: 100% !important;
+          width: 100% !important;
+          overflow: auto !important;
+          background: white !important;
+        }
+        
+        /* Hide scrollbars but keep scrolling functionality */
+        body::-webkit-scrollbar, html::-webkit-scrollbar {
+          width: 0px !important;
+          height: 0px !important;
+          background: transparent !important;
+        }
+        
+        body::-webkit-scrollbar-track, html::-webkit-scrollbar-track {
+          background: transparent !important;
+        }
+        
+        body::-webkit-scrollbar-thumb, html::-webkit-scrollbar-thumb {
+          background: transparent !important;
+        }
+        
+        /* Hide scrollbars for all elements */
+        * {
+          box-sizing: border-box !important;
+          scrollbar-width: none !important; /* Firefox */
+          -ms-overflow-style: none !important; /* IE and Edge */
+        }
+        
+        *::-webkit-scrollbar {
+          width: 0px !important;
+          height: 0px !important;
+          background: transparent !important;
+        }
+        
+        /* Force main content containers to allow scrolling */
+        .container, .main-content, .content-wrapper, 
+        .page-content, .site-content, .main-container,
+        .wrapper, .page-wrapper, .site-wrapper {
+          min-height: 100% !important;
+          overflow: auto !important;
+        }
+        
+        /* Remove any top/bottom margins that might create gaps */
+        .header, .navbar, .top-bar {
+          margin-top: 0 !important;
+        }
+        
+        .footer, .bottom-bar {
+          margin-bottom: 0 !important;
+        }
+      `);
+      
+      // Also try to force dimensions via JavaScript
+      view.webContents.executeJavaScript(`
+        document.body.style.height = '100vh';
+        document.body.style.minHeight = '100vh';
+        document.body.style.maxHeight = '100vh';
+        document.documentElement.style.height = '100vh';
+        document.documentElement.style.minHeight = '100vh';
+        document.documentElement.style.maxHeight = '100vh';
+      `);
+      
+      // Wait a bit more for everything to settle, then capture and send to gradient window
+      setTimeout(() => {
+        console.log('📸 Main process: Capturing website and sending to gradient window');
+        captureAndSendToGradient(view, win);
+      }, 1000);
+      
+    }, 500);
   });
 
   // Navigate
@@ -160,22 +258,38 @@ function openSiteView(win, url, W = 1280, H = 720) {
 }
 
 function closeSiteView(win) {
-  stopMirrorLoop();
+  console.log('🔄 Main process: Closing site view...');
   const rec = viewByWinId.get(win.id);
-  if (!rec) return;
+  if (!rec) {
+    console.log('⚠️ Main process: No BrowserView found to close');
+    return;
+  }
+  
+  // Clear gradient window before closing
+  clearGradientWindow();
+  
   try {
+    console.log('🔄 Main process: Removing BrowserView...');
     win.removeBrowserView(rec.view);
     rec.view.webContents.destroy();
-  } catch { /* ignore */ }
+    console.log('✅ Main process: BrowserView closed successfully');
+  } catch (error) {
+    console.error('❌ Main process: Error closing BrowserView:', error);
+  }
   viewByWinId.delete(win.id);
+  console.log('🧹 Main process: BrowserView record deleted');
 }
 
 /* -------------------- IPC from renderer -------------------- */
 ipcMain.handle("open-site-view", async (evt, url) => {
-  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return false;
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+    return false;
+  }
   const sender = BrowserWindow.fromWebContents(evt.sender);
-  if (!sender || sender.isDestroyed()) return false;
-  openSiteView(sender, url, 1280, 720);
+  if (!sender || sender.isDestroyed()) {
+    return false;
+  }
+  openSiteView(sender, url);
   return true;
 });
 
@@ -186,40 +300,45 @@ ipcMain.handle("close-site-view", async (evt) => {
   return true;
 });
 
-// Mirror control from gradient renderer (optional overrides)
+// Legacy mirror handlers (kept for compatibility but not used)
 ipcMain.handle("mirror:start", async (_e, { rect, fps }) => {
-  mirrorRect = rect || null;
-  mirrorFPS  = fps || 15;
-  await startMirrorLoop();
+  console.log('⚠️ Main process: Legacy mirror:start called (not used in new system)');
   return true;
 });
-ipcMain.handle("mirror:stop", async () => { stopMirrorLoop(); return true; });
+ipcMain.handle("mirror:stop", async () => { 
+  console.log('⚠️ Main process: Legacy mirror:stop called (not used in new system)');
+  return true; 
+});
 
-/* -------------------- Mirror loop -------------------- */
+/* -------------------- Event-driven capture system -------------------- */
 function getGradientWindow() { return windowsByIndex.get(0); } // first display is gradient
-function getSourceView() {
-  // Single active BrowserView stored in viewByWinId
-  const candidates = [...viewByWinId.values()];
-  return candidates.length ? candidates[0].view : null;
-}
-async function startMirrorLoop() {
-  stopMirrorLoop();
-  const dstWin = getGradientWindow();
-  const srcView = getSourceView();
-  if (!dstWin || dstWin.isDestroyed() || !srcView) return;
 
-  const fps = Math.min(Math.max(mirrorFPS || 15, 1), 30);
-  const interval = Math.floor(1000 / fps);
+// Single capture and send to gradient window
+async function captureAndSendToGradient(srcView, win) {
+  const gradientWin = getGradientWindow();
+  if (!gradientWin || gradientWin.isDestroyed()) {
+    console.log('⚠️ Main process: Gradient window not available');
+    return;
+  }
 
-  mirrorTimer = setInterval(async () => {
-    try {
-      const img = await srcView.webContents.capturePage(mirrorRect || null);
-      if (!dstWin.isDestroyed()) dstWin.webContents.send("mirror:frame", img.toDataURL());
-    } catch {
-      // ignore transient capture errors (during nav/minimize)
-    }
-  }, interval);
+  try {
+    console.log('📸 Main process: Capturing website screenshot...');
+    const img = await srcView.webContents.capturePage();
+    const dataUrl = img.toDataURL();
+    
+    console.log('📡 Main process: Sending screenshot to gradient window');
+    gradientWin.webContents.send("website:loaded", dataUrl);
+    console.log('✅ Main process: Screenshot sent successfully');
+  } catch (error) {
+    console.error('❌ Main process: Failed to capture/send screenshot:', error.message);
+  }
 }
-function stopMirrorLoop() {
-  if (mirrorTimer) { clearInterval(mirrorTimer); mirrorTimer = null; }
+
+// Clear gradient window when website is closed
+function clearGradientWindow() {
+  const gradientWin = getGradientWindow();
+  if (gradientWin && !gradientWin.isDestroyed()) {
+    console.log('🧹 Main process: Clearing gradient window');
+    gradientWin.webContents.send("website:closed");
+  }
 }

@@ -1,9 +1,143 @@
-const canvas   = document.getElementById("stage");
-const ctx      = canvas.getContext("2d");
 const titleEl  = document.getElementById("titlebar");
 const countsEl = document.getElementById("counts");
 const lastoscEl= document.getElementById("lastosc");
 const linkList = document.getElementById("link-list");
+const websiteIframe = document.getElementById("website-iframe");
+const tagReadingsList = document.getElementById("tag-readings-list");
+
+// Tags configuration - loaded from JSON
+let tagsConfig = {};
+let currentActiveTag = null;
+
+// PNG Sequence Animation variables
+let hudAnimation = null;
+let hudAnimationInterval = null;
+let currentFrame = 169; // Starting frame number
+const totalFrames = 131; // Total number of frames (169 to 299)
+const animationSpeed = 20;// Milliseconds between frames (20 FPS)
+let currentTagPosition = null; // Store current tag position
+
+// PNG Sequence Animation Functions
+function initializeHUDAnimation() {
+  hudAnimation = document.getElementById('hud-animation');
+  if (!hudAnimation) {
+    console.error('❌ HUD animation element not found');
+    return;
+  }
+  console.log('🎬 HUD animation initialized');
+}
+
+function startHUDAnimation(tagX, tagY) {
+  if (!hudAnimation || hudAnimationInterval) return;
+  
+  // Store tag position
+  currentTagPosition = { x: tagX, y: tagY };
+  
+  // Convert TUIO coordinates (0-1) to screen pixels
+  const screenX = tagX * window.innerWidth;
+  const screenY = tagY * window.innerHeight;
+  
+  console.log('🎬 Starting HUD animation at position:', { x: screenX, y: screenY });
+  
+  // Position the animation at tag location
+  hudAnimation.style.left = screenX + 'px';
+  hudAnimation.style.top = screenY + 'px';
+  hudAnimation.style.display = 'block';
+  hudAnimation.classList.add('visible');
+  
+  hudAnimationInterval = setInterval(() => {
+    const frameNumber = currentFrame.toString().padStart(5, '0');
+    hudAnimation.src = `assets/tangible/HUD Png/HUD_${frameNumber}.png`;
+    
+    currentFrame++;
+    if (currentFrame > 299) {
+      currentFrame = 169; // Loop back to start
+    }
+  }, animationSpeed);
+}
+
+function stopHUDAnimation() {
+  if (!hudAnimation || !hudAnimationInterval) return;
+  
+  console.log('🎬 Stopping HUD animation');
+  clearInterval(hudAnimationInterval);
+  hudAnimationInterval = null;
+  
+  hudAnimation.classList.remove('visible');
+  setTimeout(() => {
+    hudAnimation.style.display = 'none';
+  }, 300); // Wait for fade out transition
+}
+
+// Load tags configuration from JSON
+async function loadTagsConfig() {
+  try {
+    const response = await fetch('./tags.json');
+    tagsConfig = await response.json();
+    console.log("📋 Tags configuration loaded:", tagsConfig);
+  } catch (error) {
+    console.error("❌ Failed to load tags configuration:", error);
+  }
+}
+
+// Create dynamic buttons based on tag configuration
+function createDynamicButtons(tagId) {
+  const controlPanel = document.querySelector('.control-panel');
+  if (!controlPanel) return;
+  
+  // Remove existing buttons (except the panel title and tag readings)
+  const existingButtons = controlPanel.querySelectorAll('.website-btn');
+  existingButtons.forEach(btn => btn.remove());
+  
+  const tagConfig = tagsConfig[tagId];
+  if (!tagConfig) {
+    console.warn(`⚠️ No configuration found for tag ${tagId}`);
+    return;
+  }
+  
+  // Create buttons for this tag
+  const buttonsContainer = document.createElement('div');
+  buttonsContainer.className = 'buttons-container';
+  
+  tagConfig.buttons.forEach((buttonConfig, index) => {
+    const btn = document.createElement('button');
+    btn.className = 'website-btn';
+    if (index === 0) btn.classList.add('active'); // First button is active by default
+    btn.textContent = buttonConfig.text;
+    btn.setAttribute('data-url', buttonConfig.url);
+    btn.title = buttonConfig.url;
+    
+    // Add click event listener
+    btn.addEventListener('click', () => {
+      console.log(`🔄 Switching to button: ${buttonConfig.text}`);
+      console.log(`🌐 New URL: ${buttonConfig.url}`);
+      
+      // Remove active class from all buttons
+      const allButtons = buttonsContainer.querySelectorAll('.website-btn');
+      allButtons.forEach(b => b.classList.remove('active'));
+      
+      // Add active class to clicked button
+      btn.classList.add('active');
+      
+      // Load the new website with current tag position
+      if (currentTagPosition) {
+        showWebsiteOverlay(buttonConfig.url, currentTagPosition.x, currentTagPosition.y);
+      } else {
+        showWebsiteOverlay(buttonConfig.url);
+      }
+    });
+    
+    buttonsContainer.appendChild(btn);
+  });
+  
+  // Insert buttons container before tag readings
+  const tagReadings = controlPanel.querySelector('.tag-readings');
+  if (tagReadings) {
+    controlPanel.insertBefore(buttonsContainer, tagReadings);
+  } else {
+    controlPanel.appendChild(buttonsContainer);
+  }
+}
 
 // Your links
 const LINKS = [
@@ -44,107 +178,336 @@ const LINKS = [
 ];
 
 // Build the list
-(function buildList() {
-  linkList.innerHTML = "";
-  LINKS.forEach((url, idx) => {
-    const btn = document.createElement("button");
-    btn.className = "link-btn";
-    try {
-      const u = new URL(url);
-      const segs = u.pathname.split("/").filter(Boolean);
-      const last = segs[segs.length - 1] || u.host;
-      btn.textContent = `${idx + 1}. ${last}`;
-    } catch { btn.textContent = `${idx + 1}. ${url}`; }
-    btn.title = url;
-    btn.addEventListener("click", () => window.actions?.openSiteView?.(url));
-    linkList.appendChild(btn);
-  });
-})();
+// (function buildList() {
+//   linkList.innerHTML = "";
+//   LINKS.forEach((url, idx) => {
+//     const btn = document.createElement("button");
+//     btn.className = "link-btn";
+//     try {
+//       const u = new URL(url);
+//       const segs = u.pathname.split("/").filter(Boolean);
+//       const last = segs[segs.length - 1] || u.host;
+//       btn.textContent = `${idx + 1}. ${last}`;
+//     } catch { btn.textContent = `${idx + 1}. ${url}`; }
+//     btn.title = url;
+//     btn.addEventListener("click", () => window.actions?.openSiteView?.(url));
+//     linkList.appendChild(btn);
+//   });
+// })();
 
-// ------- TUIO drawing -------
-const toDeg   = (rad) => ((rad * 180) / Math.PI + 360) % 360;
-const roundPx = (n)  => Math.round(n);
+// ------- TUIO tracking -------
 const cursors  = new Map();
 const objects  = new Map();
 
 window.appState?.onInit?.(({ titleText }) => { if (titleEl) titleEl.textContent = titleText || "Display"; });
 
-// FIXED-RESIZE: lock canvas buffer to CSS size (no DPR scaling)
-function resize() {
-  canvas.width  = canvas.clientWidth;   // CHANGED: no * devicePixelRatio
-  canvas.height = canvas.clientHeight;  // CHANGED
-  ctx.setTransform(1, 0, 0, 1, 0, 0);   // CHANGED: reset to 1:1
-}
-window.addEventListener("resize", resize);
-resize();
-
-function normToPixels(nx, ny) {
-  const w = canvas.width, h = canvas.height; // CHANGED: use actual buffer size
-  return { px: nx * w, py: (1 - ny) * h };
-}
-
-function draw() {
-  const w = canvas.width, h = canvas.height; // CHANGED
-  ctx.clearRect(0, 0, w, h);
-
-  objects.forEach((o) => {
-    const px = o.x * w, py = (1 - o.y) * h;
-    const r = Math.min(w, h) * 0.05, pad = 8;
-
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-    ctx.lineWidth = 4; ctx.strokeStyle = "#88c0d0"; ctx.stroke();
-
-    ctx.save();
-    ctx.rotate(-(o.angle || 0));
-    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(r, 0);
-    ctx.lineWidth = 3; ctx.strokeStyle = "#81a1c1"; ctx.stroke();
-    ctx.restore();
-
-    ctx.font = "14px system-ui"; ctx.fillStyle = "#e5e9f0";
-    ctx.textAlign = "center"; ctx.textBaseline = "bottom";
-    ctx.fillText(`ID:${o.id ?? o.sid}`, 0, -r - 6);
-
-    const rotDeg = toDeg(o.angle || 0).toFixed(1);
-    ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillStyle = "#d8dee9";
-    ctx.fillText(`rot: ${rotDeg}°`, r + pad, 0);
-
-    ctx.textAlign = "right";
-    ctx.fillText(`pos: ${roundPx(px)}, ${roundPx(py)}`, -r - pad, 0);
-    ctx.restore();
-  });
-
-  cursors.forEach((c) => {
-    const { px, py } = normToPixels(c.x, c.y);
-    ctx.beginPath(); ctx.arc(px, py, 12, 0, Math.PI * 2);
-    ctx.fillStyle = "#a3be8c"; ctx.fill();
-  });
-
+// Update HUD with current counts
+function updateHUD() {
   countsEl.textContent = `obj:${objects.size} cur:${[...cursors.keys()].length}`;
-  requestAnimationFrame(draw);
 }
-draw();
+
+// Website button functionality
+function initializeWebsiteButtons() {
+  const buttons = document.querySelectorAll('.website-btn');
+  
+  buttons.forEach(button => {
+    button.addEventListener('click', () => {
+      // Remove active class from all buttons
+      buttons.forEach(btn => btn.classList.remove('active'));
+      
+      // Add active class to clicked button
+      button.classList.add('active');
+      
+      // Update iframe source
+      const url = button.getAttribute('data-url');
+      if (websiteIframe && url) {
+        websiteIframe.src = url;
+        console.log(`🌐 Loading website: ${url}`);
+      }
+    });
+  });
+}
+
+// Update tag readings display
+// function updateTagReadings() {
+//   if (!tagReadingsList) return;
+  
+//   if (objects.size === 0) {
+//     tagReadingsList.innerHTML = '<div class="reading-item">No tags detected</div>';
+//     return;
+//   }
+  
+//   let readingsHTML = '';
+//   objects.forEach((tag, sessionId) => {
+//     readingsHTML += `
+//       <div class="reading-item">
+//         <strong>Tag ${tag.id}</strong><br>
+//         Pos: (${tag.x.toFixed(2)}, ${tag.y.toFixed(2)})<br>
+//         Angle: ${(tag.angle || 0).toFixed(1)}°
+//       </div>
+//     `;
+//   });
+  
+//   tagReadingsList.innerHTML = readingsHTML;
+// }
+
+// Show website using Electron BrowserView
+async function showWebsiteOverlay(url, tagX = null, tagY = null) {
+  console.log(`🌐 Starting to show website overlay: ${url}`);
+  console.log(`📍 Tag position: x=${tagX}, y=${tagY}`);
+  
+  // Start HUD animation at tag position
+  if (tagX !== null && tagY !== null) {
+    console.log('🎬 Starting HUD animation at tag position');
+    startHUDAnimation(tagX, tagY);
+  } else {
+    console.log('🎬 Starting HUD animation at default position');
+    startHUDAnimation();
+  }
+  
+  // Show preloader
+  const preloader = document.getElementById('browserViewLoader');
+  if (preloader) {
+    preloader.style.display = 'flex';
+    console.log('⏳ Showing preloader');
+  } else {
+    console.log('⚠️ Preloader element not found');
+  }
+  
+  try {
+    console.log('🔄 Calling openSiteView IPC...');
+    // Use your existing IPC system to open the website in BrowserView
+    const success = await window.actions?.openSiteView?.(url);
+    if (success) {
+      console.log(`✅ Website opened successfully in BrowserView: ${url}`);
+    } else {
+      console.error(`❌ Failed to open website - IPC returned false: ${url}`);
+    }
+  } catch (error) {
+    console.error('❌ Error opening website:', error);
+  } finally {
+    // Hide preloader after a longer delay to ensure BrowserView is fully loaded
+    setTimeout(() => {
+      if (preloader) {
+        preloader.style.display = 'none';
+        console.log('⏳ Hiding preloader');
+      }
+    }, 2000); // Increased delay for better reliability
+  }
+}
+
+// Hide website overlay (close BrowserView)
+async function hideWebsiteOverlay() {
+  try {
+    // Stop HUD animation
+    stopHUDAnimation();
+    
+    // Hide preloader if visible
+    const preloader = document.getElementById('browserViewLoader');
+    if (preloader) {
+      preloader.style.display = 'none';
+    }
+    
+    // Close the BrowserView using your existing IPC system
+    const success = await window.actions?.closeSiteView?.();
+    if (success) {
+      console.log(`🌐 BrowserView closed`);
+    } else {
+      console.error(`🌐 Failed to close BrowserView`);
+    }
+  } catch (error) {
+    console.error('Error closing BrowserView:', error);
+  }
+}
+
+// Initialize the application
+async function initializeApp() {
+  await loadTagsConfig();
+  initializeHUDAnimation();
+  console.log("🚀 Application initialized with dynamic tag system");
+}
+
+// Initialize application when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+  initializeApp();
+  initializeBackgroundVideo();
+});
+
+// Initialize background video to prevent pausing
+function initializeBackgroundVideo() {
+  const bgVideo = document.getElementById('bg-video');
+  if (!bgVideo) return;
+
+  // Ensure video plays and doesn't get paused
+  const ensureVideoPlaying = () => {
+    if (bgVideo.paused) {
+      bgVideo.play().catch(e => console.log('Video play failed:', e));
+    }
+  };
+
+  // Check every 2 seconds if video is paused and restart if needed
+  setInterval(ensureVideoPlaying, 2000);
+
+  // Restart video on various events that might cause pausing
+  bgVideo.addEventListener('pause', () => {
+    setTimeout(() => bgVideo.play().catch(e => console.log('Video restart failed:', e)), 100);
+  });
+
+  bgVideo.addEventListener('ended', () => {
+    bgVideo.currentTime = 0;
+    bgVideo.play().catch(e => console.log('Video loop failed:', e));
+  });
+
+  // Ensure video starts playing
+  bgVideo.play().catch(e => console.log('Initial video play failed:', e));
+}
 
 function setLast(addr){ if (lastoscEl) lastoscEl.textContent = `last: ${addr}`; }
+
+function logTagDetails(tag) {
+  
+  // Log screen dimensions
+  console.log("📐 Screen Dimensions:", {
+    windowWidth: window.innerWidth,
+    windowHeight: window.innerHeight,
+    screenWidth: screen.width,
+    screenHeight: screen.height,
+    availWidth: screen.availWidth,
+    availHeight: screen.availHeight,
+    devicePixelRatio: window.devicePixelRatio
+  });
+  
+  console.log("🎯 Tag Placed:", {
+    sessionId: tag.sid,
+    tagId: tag.id,
+    position: { x: tag.x, y: tag.y },
+    angle: tag.angle,
+    timestamp: new Date().toISOString()
+  });
+  console.log("📊 Raw Tag Data:", tag);
+  
+  // Check if this tag is in our configuration
+  if (tagsConfig[tag.id]) {
+    showMainInterface();
+    createDynamicButtons(tag.id);
+    currentActiveTag = tag.id;
+    currentTagPosition = { x: tag.x, y: tag.y }; // Store tag position
+    
+    // Automatically show the first website when tag is placed
+    if (tagsConfig[tag.id].buttons.length > 0) {
+      showWebsiteOverlay(tagsConfig[tag.id].buttons[0].url, tag.x, tag.y);
+    }
+    
+    console.log(`🎬 Interface activated for tag ${tag.id}`);
+  }
+}
+
+// Show main interface when tag 204 is detected
+function showMainInterface() {
+  const mainContainer = document.querySelector('.main-container');
+  if (mainContainer && !mainContainer.classList.contains('show')) {
+    mainContainer.classList.add('show');
+    console.log("🎬 Main interface revealed by tag 204!");
+  }
+  
+  // Show logo
+  showLogo();
+}
+
+// Hide main interface when tag 204 is removed
+function hideMainInterface() {
+  const mainContainer = document.querySelector('.main-container');
+  if (mainContainer && mainContainer.classList.contains('show')) {
+    mainContainer.classList.remove('show');
+    currentActiveTag = null;
+    currentTagPosition = null; // Clear tag position
+    console.log("🎬 Main interface hidden - active tag removed!");
+  }
+  
+  // Hide logo
+  hideLogo();
+}
+
+// Check if a specific tag ID is present
+function hasTag(tagId) {
+  for (const tag of objects.values()) {
+    if (tag.id === tagId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Show logo function
+function showLogo() {
+  const logo = document.getElementById('logo');
+  if (logo && !logo.classList.contains('visible')) {
+    logo.classList.add('visible');
+    console.log("🏷️ Logo shown");
+  }
+}
+
+// Hide logo function
+function hideLogo() {
+  const logo = document.getElementById('logo');
+  if (logo && logo.classList.contains('visible')) {
+    logo.classList.remove('visible');
+    console.log("🏷️ Logo hidden");
+  }
+}
+
 function handleTuio1(path, args) {
   if (path === "/tuio/2Dcur") {
     const cmd = args[0];
-    if (cmd === "alive") {
-      const alive = new Set(args.slice(1).map(String));
-      for (const k of [...cursors.keys()]) if (!alive.has(k)) cursors.delete(k);
-    } else if (cmd === "set") {
+    if (cmd === "set") {
       const sid = String(args[1]); const x=args[2], y=args[3];
       cursors.set(sid, { sid, x, y });
+    } else if (cmd === "alive") {
+      // Handle cursor removal
+      const aliveIds = new Set(args.slice(1).map(String));
+      for (const [sid] of cursors) {
+        if (!aliveIds.has(sid)) {
+          cursors.delete(sid);
+        }
+      }
     }
   } else if (path === "/tuio/2Dobj") {
     const cmd = args[0];
-    if (cmd === "alive") {
-      const alive = new Set(args.slice(1).map(String));
-      for (const sid of [...objects.keys()]) if (!alive.has(sid)) objects.delete(sid);
-    } else if (cmd === "set") {
+    if (cmd === "set") {
       const s = String(args[1]); const id=args[2], x=args[3], y=args[4], a=args[5];
-      objects.set(s, { sid:s, id, x, y, angle:a });
+      const tag = { sid:s, id, x, y, angle:a };
+      
+      // Check if this is a new tag placement
+      if (!objects.has(s)) {
+        logTagDetails(tag);
+      }
+      
+      objects.set(s, tag);
+      updateHUD();
+      // updateTagReadings();
+    } else if (cmd === "alive") {
+      // Handle object removal
+      const aliveIds = new Set(args.slice(1).map(String));
+      const removedTags = [];
+      
+      for (const [sid, tag] of objects) {
+        if (!aliveIds.has(sid)) {
+          removedTags.push(tag);
+          objects.delete(sid);
+        }
+      }
+      
+      // Check if any removed tag was the active one
+      if (removedTags.length > 0 && currentActiveTag) {
+        const wasActiveTagRemoved = removedTags.some(tag => tag.id === currentActiveTag);
+        if (wasActiveTagRemoved) {
+          hideMainInterface();
+          hideWebsiteOverlay(); // Close BrowserView when tag is removed
+        }
+      }
+      
+      updateHUD();
+      // updateTagReadings();
     }
   }
 }
@@ -152,12 +515,17 @@ function handleTuio2(path, args) {
   if (path === "/tuio2/ptr") {
     if (typeof args[0] === "string") {
       const cmd = args[0];
-      if (cmd === "alive") {
-        const alive = new Set(args.slice(1).map(String));
-        for (const k of [...cursors.keys()]) if (!alive.has(k)) cursors.delete(k);
-      } else if (cmd === "set") {
+      if (cmd === "set") {
         const sid = String(args[1]); const x=Number(args[2]); const y=Number(args[3]);
         if (!Number.isNaN(x) && !Number.isNaN(y)) cursors.set(sid, { sid, x, y });
+      } else if (cmd === "alive") {
+        // Handle cursor removal
+        const aliveIds = new Set(args.slice(1).map(String));
+        for (const [sid] of cursors) {
+          if (!aliveIds.has(sid)) {
+            cursors.delete(sid);
+          }
+        }
       }
     }
     return;
@@ -165,20 +533,47 @@ function handleTuio2(path, args) {
   if (path === "/tuio2/obj") {
     if (typeof args[0] === "string") {
       const cmd = args[0];
-      if (cmd === "alive") {
-        const alive = new Set(args.slice(1).map(String));
-        for (const sid of [...objects.keys()]) if (!alive.has(sid)) objects.delete(sid);
-      } else if (cmd === "set") {
+      if (cmd === "set") {
         const s  = String(args[1]); const id=args[2];
         const x  = Number(args[3]); const y=Number(args[4]); const a=Number(args[5])||0;
-        if (!Number.isNaN(x) && !Number.isNaN(y)) objects.set(s, { sid:s, id, x, y, angle:a });
+        if (!Number.isNaN(x) && !Number.isNaN(y)) {
+          const tag = { sid:s, id, x, y, angle:a };
+          
+          // Check if this is a new tag placement
+          if (!objects.has(s)) {
+            logTagDetails(tag);
+          }
+          
+          objects.set(s, tag);
+          updateHUD();
+          // updateTagReadings();
+        }
+      } else if (cmd === "alive") {
+        // Handle object removal
+        const aliveIds = new Set(args.slice(1).map(String));
+        const removedTags = [];
+        
+        for (const [sid, tag] of objects) {
+          if (!aliveIds.has(sid)) {
+            removedTags.push(tag);
+            objects.delete(sid);
+          }
+        }
+        
+        // Check if any removed tag was the active one
+        if (removedTags.length > 0 && currentActiveTag) {
+          const wasActiveTagRemoved = removedTags.some(tag => tag.id === currentActiveTag);
+          if (wasActiveTagRemoved) {
+            hideMainInterface();
+            hideWebsiteOverlay(); // Close BrowserView when tag is removed
+          }
+        }
+        
+        updateHUD();
+        // updateTagReadings();
       }
     }
     return;
-  }
-  if (path === "/tuio2/alv") {
-    const alive = new Set(args.map(String));
-    for (const k of [...cursors.keys()]) if (!alive.has(k)) cursors.delete(k);
   }
 }
 function handleOsc(msg) {
