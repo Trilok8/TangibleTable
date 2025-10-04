@@ -127,7 +127,6 @@ function startTuioReceiver() {
 
 /* -------------------- BrowserView helpers -------------------- */
 function openSiteView(win, url) {
-  console.log(`🔄 Main process: Opening site view for URL: ${url}`);
   closeSiteView(win); // ensure only one
 
   const view = new BrowserView({
@@ -140,7 +139,6 @@ function openSiteView(win, url) {
     }
   });
   win.setBrowserView(view);
-  console.log(`✅ Main process: BrowserView created and attached`);
   
   // Get window bounds and content bounds
   const contentBounds = win.getContentBounds();
@@ -169,12 +167,8 @@ function openSiteView(win, url) {
 
   // IMPORTANT: subscribe to 'did-finish-load' BEFORE navigation to avoid missing it
   view.webContents.once("did-finish-load", () => {
-    console.log('📄 Main process: Website finished loading');
-    
     // Wait a bit for the page to fully render, then force dimensions
     setTimeout(() => {
-      console.log('🎨 Main process: Applying CSS and JavaScript to website');
-      
       // Force the website to fill the full BrowserView height with scrolling
       view.webContents.insertCSS(`
         body, html {
@@ -241,14 +235,10 @@ function openSiteView(win, url) {
         document.documentElement.style.minHeight = '100vh';
         document.documentElement.style.maxHeight = '100vh';
       `);
-      
-      // Wait a bit more for everything to settle, then capture and send to gradient window
-      setTimeout(() => {
-        console.log('📸 Main process: Capturing website and sending to gradient window');
-        captureAndSendToGradient(view, win);
-      }, 1000);
-      
     }, 500);
+    
+    mirrorRect = null;       // full view
+    startMirrorLoop();       // only start after the page is fully ready
   });
 
   // Navigate
@@ -258,26 +248,14 @@ function openSiteView(win, url) {
 }
 
 function closeSiteView(win) {
-  console.log('🔄 Main process: Closing site view...');
+  stopMirrorLoop();
   const rec = viewByWinId.get(win.id);
-  if (!rec) {
-    console.log('⚠️ Main process: No BrowserView found to close');
-    return;
-  }
-  
-  // Clear gradient window before closing
-  clearGradientWindow();
-  
+  if (!rec) return;
   try {
-    console.log('🔄 Main process: Removing BrowserView...');
     win.removeBrowserView(rec.view);
     rec.view.webContents.destroy();
-    console.log('✅ Main process: BrowserView closed successfully');
-  } catch (error) {
-    console.error('❌ Main process: Error closing BrowserView:', error);
-  }
+  } catch { /* ignore */ }
   viewByWinId.delete(win.id);
-  console.log('🧹 Main process: BrowserView record deleted');
 }
 
 /* -------------------- IPC from renderer -------------------- */
@@ -300,45 +278,49 @@ ipcMain.handle("close-site-view", async (evt) => {
   return true;
 });
 
-// Legacy mirror handlers (kept for compatibility but not used)
+// Mirror control from gradient renderer (optional overrides)
 ipcMain.handle("mirror:start", async (_e, { rect, fps }) => {
-  console.log('⚠️ Main process: Legacy mirror:start called (not used in new system)');
+  mirrorRect = rect || null;
+  mirrorFPS  = fps || 15;
+  await startMirrorLoop();
   return true;
 });
-ipcMain.handle("mirror:stop", async () => { 
-  console.log('⚠️ Main process: Legacy mirror:stop called (not used in new system)');
-  return true; 
-});
+ipcMain.handle("mirror:stop", async () => { stopMirrorLoop(); return true; });
 
-/* -------------------- Event-driven capture system -------------------- */
+/* -------------------- Mirror loop -------------------- */
 function getGradientWindow() { return windowsByIndex.get(0); } // first display is gradient
-
-// Single capture and send to gradient window
-async function captureAndSendToGradient(srcView, win) {
-  const gradientWin = getGradientWindow();
-  if (!gradientWin || gradientWin.isDestroyed()) {
-    console.log('⚠️ Main process: Gradient window not available');
-    return;
-  }
-
-  try {
-    console.log('📸 Main process: Capturing website screenshot...');
-    const img = await srcView.webContents.capturePage();
-    const dataUrl = img.toDataURL();
-    
-    console.log('📡 Main process: Sending screenshot to gradient window');
-    gradientWin.webContents.send("website:loaded", dataUrl);
-    console.log('✅ Main process: Screenshot sent successfully');
-  } catch (error) {
-    console.error('❌ Main process: Failed to capture/send screenshot:', error.message);
-  }
+function getSourceView() {
+  // Single active BrowserView stored in viewByWinId
+  const candidates = [...viewByWinId.values()];
+  return candidates.length ? candidates[0].view : null;
 }
+async function startMirrorLoop() {
+  stopMirrorLoop();
+  const dstWin = getGradientWindow();
+  const srcView = getSourceView();
+  if (!dstWin || dstWin.isDestroyed() || !srcView) return;
 
-// Clear gradient window when website is closed
-function clearGradientWindow() {
-  const gradientWin = getGradientWindow();
-  if (gradientWin && !gradientWin.isDestroyed()) {
-    console.log('🧹 Main process: Clearing gradient window');
-    gradientWin.webContents.send("website:closed");
+  const fps = Math.min(Math.max(mirrorFPS || 15, 1), 30);
+  const interval = Math.floor(1000 / fps);
+
+  mirrorTimer = setInterval(async () => {
+    try {
+      const img = await srcView.webContents.capturePage(mirrorRect || null);
+      if (!dstWin.isDestroyed()) dstWin.webContents.send("mirror:frame", img.toDataURL());
+    } catch {
+      // ignore transient capture errors (during nav/minimize)
+    }
+  }, interval);
+}
+function stopMirrorLoop() {
+  if (mirrorTimer) { 
+    clearInterval(mirrorTimer); 
+    mirrorTimer = null; 
+    
+    // Refresh gradient window to show background video (only when actually stopping)
+    const gradientWin = getGradientWindow();
+    if (gradientWin && !gradientWin.isDestroyed()) {
+      gradientWin.reload();
+    }
   }
 }

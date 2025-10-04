@@ -109,9 +109,6 @@ function createDynamicButtons(tagId) {
     
     // Add click event listener
     btn.addEventListener('click', () => {
-      console.log(`🔄 Switching to button: ${buttonConfig.text}`);
-      console.log(`🌐 New URL: ${buttonConfig.url}`);
-      
       // Remove active class from all buttons
       const allButtons = buttonsContainer.querySelectorAll('.website-btn');
       allButtons.forEach(b => b.classList.remove('active'));
@@ -202,9 +199,9 @@ const objects  = new Map();
 window.appState?.onInit?.(({ titleText }) => { if (titleEl) titleEl.textContent = titleText || "Display"; });
 
 // Update HUD with current counts
-function updateHUD() {
-  countsEl.textContent = `obj:${objects.size} cur:${[...cursors.keys()].length}`;
-}
+// function updateHUD() {
+//   countsEl.textContent = `obj:${objects.size} cur:${[...cursors.keys()].length}`;
+// }
 
 // Website button functionality
 function initializeWebsiteButtons() {
@@ -253,15 +250,10 @@ function initializeWebsiteButtons() {
 
 // Show website using Electron BrowserView
 async function showWebsiteOverlay(url, tagX = null, tagY = null) {
-  console.log(`🌐 Starting to show website overlay: ${url}`);
-  console.log(`📍 Tag position: x=${tagX}, y=${tagY}`);
-  
   // Start HUD animation at tag position
   if (tagX !== null && tagY !== null) {
-    console.log('🎬 Starting HUD animation at tag position');
     startHUDAnimation(tagX, tagY);
   } else {
-    console.log('🎬 Starting HUD animation at default position');
     startHUDAnimation();
   }
   
@@ -269,30 +261,25 @@ async function showWebsiteOverlay(url, tagX = null, tagY = null) {
   const preloader = document.getElementById('browserViewLoader');
   if (preloader) {
     preloader.style.display = 'flex';
-    console.log('⏳ Showing preloader');
-  } else {
-    console.log('⚠️ Preloader element not found');
   }
   
   try {
-    console.log('🔄 Calling openSiteView IPC...');
     // Use your existing IPC system to open the website in BrowserView
     const success = await window.actions?.openSiteView?.(url);
     if (success) {
-      console.log(`✅ Website opened successfully in BrowserView: ${url}`);
+      console.log(`🌐 Website opened in BrowserView: ${url}`);
     } else {
-      console.error(`❌ Failed to open website - IPC returned false: ${url}`);
+      console.error(`🌐 Failed to open website: ${url}`);
     }
   } catch (error) {
-    console.error('❌ Error opening website:', error);
+    console.error('Error opening website:', error);
   } finally {
-    // Hide preloader after a longer delay to ensure BrowserView is fully loaded
+    // Hide preloader after a short delay to ensure BrowserView is visible
     setTimeout(() => {
       if (preloader) {
         preloader.style.display = 'none';
-        console.log('⏳ Hiding preloader');
       }
-    }, 2000); // Increased delay for better reliability
+    }, 1000);
   }
 }
 
@@ -409,9 +396,6 @@ function showMainInterface() {
     mainContainer.classList.add('show');
     console.log("🎬 Main interface revealed by tag 204!");
   }
-  
-  // Show logo
-  showLogo();
 }
 
 // Hide main interface when tag 204 is removed
@@ -423,9 +407,6 @@ function hideMainInterface() {
     currentTagPosition = null; // Clear tag position
     console.log("🎬 Main interface hidden - active tag removed!");
   }
-  
-  // Hide logo
-  hideLogo();
 }
 
 // Check if a specific tag ID is present
@@ -436,24 +417,6 @@ function hasTag(tagId) {
     }
   }
   return false;
-}
-
-// Show logo function
-function showLogo() {
-  const logo = document.getElementById('logo');
-  if (logo && !logo.classList.contains('visible')) {
-    logo.classList.add('visible');
-    console.log("🏷️ Logo shown");
-  }
-}
-
-// Hide logo function
-function hideLogo() {
-  const logo = document.getElementById('logo');
-  if (logo && logo.classList.contains('visible')) {
-    logo.classList.remove('visible');
-    console.log("🏷️ Logo hidden");
-  }
 }
 
 function handleTuio1(path, args) {
@@ -483,7 +446,7 @@ function handleTuio1(path, args) {
       }
       
       objects.set(s, tag);
-      updateHUD();
+      // updateHUD();
       // updateTagReadings();
     } else if (cmd === "alive") {
       // Handle object removal
@@ -506,7 +469,7 @@ function handleTuio1(path, args) {
         }
       }
       
-      updateHUD();
+      // updateHUD();
       // updateTagReadings();
     }
   }
@@ -545,7 +508,7 @@ function handleTuio2(path, args) {
           }
           
           objects.set(s, tag);
-          updateHUD();
+          // updateHUD();
           // updateTagReadings();
         }
       } else if (cmd === "alive") {
@@ -569,7 +532,7 @@ function handleTuio2(path, args) {
           }
         }
         
-        updateHUD();
+        // updateHUD();
         // updateTagReadings();
       }
     }

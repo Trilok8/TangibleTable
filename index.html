@@ -164,13 +164,13 @@
 
       /* Website buttons */
       .website-btn {
-        width: 90%;
-        height: 90px;
+        width: 60%;
+        height: 60px;
         padding: 0;
-        margin: 12px auto;
+        margin: 10px auto;
         border-radius: 8px;
         cursor: pointer;
-        font-size: 21px;
+        font-size: 14px;
         font-weight: 500;
         transition: all 0.3s ease;
         background-image: url('assets/tangible/btn.png');
@@ -206,37 +206,18 @@
       }
 
       .readings-title {
-        font-size: 18px;
+        font-size: 14px;
         font-weight: bold;
-        margin-bottom: 15px;
+        margin-bottom: 10px;
         color: #88c0d0;
       }
 
       .reading-item {
-        font-size: 16px;
-        margin: 8px 0;
-        padding: 8px;
+        font-size: 12px;
+        margin: 5px 0;
+        padding: 5px;
         border-radius: 4px;
         font-family: monospace;
-      }
-
-      /* Logo - top-left corner */
-      #logo {
-        position: fixed;
-        top: 20px;
-        left: 20px;
-        width: 500px;
-        height: auto;
-        z-index: 200;
-        opacity: 0;
-        transition: opacity 0.3s ease-in-out;
-        pointer-events: none;
-        display: none;
-      }
-
-      #logo.visible {
-        opacity: 1;
-        display: block;
       }
 
       /* HUD - small snippet in top-left */
@@ -298,9 +279,6 @@
       
       <!-- PNG Sequence Animation -->
       <img id="hud-animation" src="" alt="HUD Animation" style="display: none;">
-      
-      <!-- Logo -->
-      <img id="logo" src="assets/tangible/logo.png" alt="Logo">
     
     <!-- Main layout container -->
     <div class="main-container">
@@ -331,11 +309,11 @@
     </div>
 
     <!-- HUD overlay -->
-    <div id="hud">
+    <!-- <div id="hud">
       TUIO
       <span id="counts" class="pill">obj:0 cur:0</span>
       <span id="lastosc" class="pill">last: —</span>
-    </div>
+    </div> -->
 
     <script src="./renderer.js" defer></script>
   </body>

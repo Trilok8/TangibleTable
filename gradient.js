@@ -35,43 +35,24 @@ async function decodeNext() {
   pendingUrl = null;
 
   try {
-    console.log('🔄 Gradient window: Decoding new frame...');
     const blob = dataURLToBlob(url);
     const bmp  = await createImageBitmap(blob);
     if (currentBitmap) currentBitmap.close();
     currentBitmap = bmp;
-    console.log('✅ Gradient window: Frame decoded successfully');
-  } catch (error) {
-    console.log('❌ Gradient window: Frame decode error:', error.message);
+  } catch {
+    // ignore one-off decode issues
   } finally {
     decoding = false;
     if (pendingUrl) decodeNext();
   }
 }
 
-// Receive website screenshots from main process
-if (window.websiteDisplay?.onLoaded) {
-  console.log('✅ Gradient window: Setting up website display listener');
-  window.websiteDisplay.onLoaded((dataUrl) => {
-    console.log('📡 Gradient window: Received website screenshot');
+// Receive frames from main
+if (window.mirror?.onFrame) {
+  window.mirror.onFrame((dataUrl) => {
     pendingUrl = dataUrl;
     if (!decoding) decodeNext();
-    
-    // Video continues playing in background - no interference
   });
-} else {
-  console.log('⚠️ Gradient window: websiteDisplay.onLoaded not available');
-}
-
-// Clear canvas when website is closed
-if (window.websiteDisplay?.onClosed) {
-  console.log('✅ Gradient window: Setting up website close listener');
-  window.websiteDisplay.onClosed(() => {
-    console.log('📡 Gradient window: Website closed, clearing canvas');
-    clearCanvas();
-  });
-} else {
-  console.log('⚠️ Gradient window: websiteDisplay.onClosed not available');
 }
 
 // Draw loop
@@ -98,76 +79,51 @@ function drawFrame() {
 }
 drawFrame();
 
-// Function to clear canvas completely
-function clearCanvas() {
-  console.log('🧹 Starting to clear canvas...');
-  if (currentBitmap) {
-    console.log('🧹 Closing current bitmap');
-    currentBitmap.close();
-    currentBitmap = null;
-  } else {
-    console.log('🧹 No current bitmap to close');
-  }
-  pendingUrl = null;
-  console.log('🧹 Canvas cleared - background video continues playing');
-  
-  // Video should always be playing - no need to check here
-}
+// Ask main to start sending frames (full view, 15 fps)
+window.mirror?.start(null, 15);
 
-// Video management is now handled independently in initializeBackgroundVideo()
-
-// No need to start mirror loop - we use event-driven system now
-console.log('🎬 Gradient window: Ready for event-driven website display');
-
-// Initialize background video - completely independent of canvas
+// Initialize background video to prevent pausing
 function initializeBackgroundVideo() {
   const bgVideo = document.getElementById('bg-video');
-  if (!bgVideo) {
-    console.log('⚠️ Background video element not found');
-    return;
-  }
+  if (!bgVideo) return;
 
-  console.log('🎬 Initializing independent background video...');
-
-  // Set video properties to ensure it plays continuously
+  // Set video properties to ensure it plays
   bgVideo.muted = true;
   bgVideo.loop = true;
   bgVideo.autoplay = true;
-  bgVideo.playsInline = true;
 
-  // Simple and robust video management - just keep it playing
-  const keepVideoPlaying = () => {
+  // Ensure video plays and doesn't get paused
+  const ensureVideoPlaying = () => {
     if (bgVideo.paused) {
-      console.log('🔄 Video was paused, restarting...');
-      bgVideo.play().catch(e => console.log('❌ Video restart failed:', e));
+      console.log('Gradient video was paused, restarting...');
+      bgVideo.play().catch(e => console.log('Gradient video play failed:', e));
     }
   };
 
-  // Check every 2 seconds and restart if needed
-  setInterval(keepVideoPlaying, 2000);
+  // Check every 2 seconds if video is paused and restart if needed
+  setInterval(ensureVideoPlaying, 2000);
 
-  // Handle video events
+  // Restart video on various events that might cause pausing
   bgVideo.addEventListener('pause', () => {
-    console.log('⏸️ Video paused, restarting...');
-    setTimeout(() => bgVideo.play().catch(e => console.log('❌ Restart failed:', e)), 100);
+    console.log('Gradient video pause event detected, restarting...');
+    setTimeout(() => bgVideo.play().catch(e => console.log('Gradient video restart failed:', e)), 100);
   });
 
   bgVideo.addEventListener('ended', () => {
-    console.log('🔚 Video ended, looping...');
+    console.log('Gradient video ended, restarting loop...');
     bgVideo.currentTime = 0;
-    bgVideo.play().catch(e => console.log('❌ Loop failed:', e));
+    bgVideo.play().catch(e => console.log('Gradient video loop failed:', e));
   });
 
-  // Start the video
-  console.log('🚀 Starting background video...');
+  // Force video to start playing immediately
+  console.log('Starting gradient background video...');
   bgVideo.play().catch(e => {
-    console.log('❌ Initial play failed, retrying...', e);
-    setTimeout(() => bgVideo.play().catch(e2 => console.log('❌ Retry failed:', e2)), 1000);
+    console.log('Initial gradient video play failed, retrying...', e);
+    setTimeout(() => {
+      bgVideo.play().catch(e2 => console.log('Retry gradient video play failed:', e2));
+    }, 1000);
   });
 }
 
-// Initialize background video immediately - it will run independently
+// Initialize background video immediately
 initializeBackgroundVideo();
-
-// Video is now completely independent of canvas operations
-console.log('✅ Background video initialized independently');
