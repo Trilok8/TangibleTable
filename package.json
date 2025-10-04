@@ -1,21 +1,57 @@
 {
   "name": "tangibletable",
   "version": "1.0.0",
-  "main": "main.js",
-  "type": "module",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "electron ."
-  },
-  "keywords": [],
+  "description": "Tangible Table – multi-window Electron app",
   "author": "",
   "license": "ISC",
-  "description": "",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false ELECTRON_BUILDER_SKIP_REBUILD=true electron-builder --dir",
+    "build:win:unsigned": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false ELECTRON_BUILDER_SKIP_REBUILD=true electron-builder --win nsis",
+    "build:win:portable": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false ELECTRON_BUILDER_SKIP_REBUILD=true electron-builder --win portable",
+    "build": "npm run build:win:unsigned"
+  },
   "devDependencies": {
     "cross-env": "^10.0.0",
-    "electron": "^38.1.0"
+    "electron": "^38.1.0",
+    "electron-builder": "^24.13.3"
   },
   "dependencies": {
     "osc": "^2.4.5"
+  },
+  "build": {
+    "appId": "com.example.tangibletable",
+    "productName": "TangibleTable",
+    "files": [
+      "*.html",
+      "*.js",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      { "from": "tags.json", "to": "config/tags.json" }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "assets/**"
+    ],
+    "directories": {
+      "buildResources": "assets"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TangibleTable"
+    }
   }
 }

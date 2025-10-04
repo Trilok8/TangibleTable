@@ -1,22 +1,78 @@
-import { app, BrowserWindow, BrowserView, ipcMain, screen } from "electron";
+// main.js (ESM)
+import { app, BrowserWindow, BrowserView, ipcMain, screen, shell } from "electron";
 import OSC from "osc";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readFile, writeFile, access, mkdir } from "node:fs/promises";
+import { constants as FS } from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname  = dirname(__filename);
+const __dirname = dirname(__filename);
 
 const TUIO_PORT = parseInt(process.env.TUIO_PORT || "3333", 10);
 
 const windowsByDisplayId = new Map();
-const windowsByIndex     = new Map();
-const viewByWinId        = new Map();
+const windowsByIndex = new Map();
+const viewByWinId = new Map();
 
 // --- Mirror state ---
 let mirrorTimer = null;
-let mirrorFPS   = 15;
-let mirrorRect  = null;
+let mirrorFPS = 15;
+let mirrorRect = null;
 
+const CAPTURE_FPS = parseInt(process.env.CAPTURE_FPS || "15", 10);
+const captureTimers = new Map();
+
+function stopCapture(win) {
+  const t = captureTimers.get(win.id);
+  if (t) { clearInterval(t); captureTimers.delete(win.id); }
+}
+
+function startCapture(win) {
+  stopCapture(win);
+  const rec = viewByWinId.get(win.id);
+  if (!rec) return;
+  const interval = Math.max(1, Math.floor(1000 / CAPTURE_FPS));
+  const gradientWin = windowsByIndex.get(0);
+  if (!gradientWin || gradientWin.isDestroyed()) return;
+
+  const timer = setInterval(async () => {
+    try {
+      const img = await rec.view.webContents.capturePage();
+      gradientWin.webContents.send("website:loaded", img.toDataURL());
+    } catch (e) { /* transient capture errors ok */ }
+  }, interval);
+
+  captureTimers.set(win.id, timer);
+}
+
+/* -------------------- user-editable tags.json -------------------- */
+const CONFIG_NAME = "tags.json";
+const defaultConfigInResources = join(process.resourcesPath, "config", "default-tags.json");
+const userConfigDir = join(app.getPath("userData"), "config");
+const userConfigPath = join(userConfigDir, CONFIG_NAME);
+
+async function ensureUserConfig() {
+  try {
+    await access(userConfigPath, FS.F_OK);
+  } catch {
+    await mkdir(userConfigDir, { recursive: true });
+    const src = app.isPackaged ? defaultConfigInResources : join(__dirname, "tags.json");
+    const buf = await readFile(src, "utf-8");
+    await writeFile(userConfigPath, buf, "utf-8");
+  }
+}
+
+// IPC for renderer
+ipcMain.handle("config:get", async () => JSON.parse(await readFile(userConfigPath, "utf-8")));
+ipcMain.handle("config:set", async (_e, obj) => {
+  await writeFile(userConfigPath, JSON.stringify(obj, null, 2), "utf-8");
+  return true;
+});
+ipcMain.handle("config:open-folder", async () => { shell.showItemInFolder(userConfigPath); });
+ipcMain.handle("config:path", async () => userConfigPath);
+
+/* -------------------- windows -------------------- */
 function createWindowOnDisplay(display, index) {
   const preloadPath = join(__dirname, "preload.js");
   const { bounds, id: displayId } = display;
@@ -32,26 +88,23 @@ function createWindowOnDisplay(display, index) {
       sandbox: false,
     }
   });
-  
-  // Force the window to maximize and ensure it takes full screen
+
   win.maximize();
 
   // index 0 = gradient screen, others = tags app
   const fileToLoad = index === 0 ? "gradient.html" : "index.html";
-  const url = pathToFileURL(join(__dirname, fileToLoad)).href + `?displayId=${displayId}&idx=${index}`;
-  win.loadURL(url);
-
-  // Developer tools removed for gradient display
+  win.loadFile(join(__dirname, fileToLoad), {
+    query: { displayId: String(displayId), idx: String(index) }
+  });
 
   const recenter = () => {
     const rec = viewByWinId.get(win.id);
     if (!rec) return;
-    // Recalculate dimensions based on current window content bounds
     const { width, height } = win.getContentBounds();
-    const browserViewWidth = Math.floor(width * 0.8); // 80% of screen width
-    const browserViewHeight = Math.floor(height * 0.8); // 80% of screen height
-    const x = 0; // Start at left edge
-    const y = Math.floor((height - browserViewHeight) / 2); // Center vertically
+    const browserViewWidth = Math.floor(width * 0.8);
+    const browserViewHeight = Math.floor(height * 0.8);
+    const x = 0;
+    const y = Math.floor((height - browserViewHeight) / 2);
     rec.view.setBounds({ x, y, width: browserViewWidth, height: browserViewHeight });
   };
   win.on("resize", recenter);
@@ -61,9 +114,7 @@ function createWindowOnDisplay(display, index) {
 
   // ESC closes BrowserView
   win.webContents.on("before-input-event", (_e, input) => {
-    if (input.key?.toLowerCase() === "escape") {
-      closeSiteView(win);
-    }
+    if (input.key?.toLowerCase() === "escape") closeSiteView(win);
   });
 
   windowsByDisplayId.set(displayId, win);
@@ -93,7 +144,14 @@ function ensureWindowsForAllDisplays() {
   }
 }
 
-app.whenReady().then(() => {
+// Fix white/black window on some GPUs
+app.disableHardwareAcceleration();
+
+// Optional "safe mode": windowed, centered, always on top
+const SAFE = process.argv.includes('--safe');
+
+app.whenReady().then(async () => {
+  await ensureUserConfig(); // ← ensure writable tags.json exists
   ensureWindowsForAllDisplays();
   if (windowsByDisplayId.size === 0) createWindowOnDisplay(screen.getPrimaryDisplay(), 0);
 
@@ -109,7 +167,7 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 
-/* -------------------- TUIO receiver (single port) -------------------- */
+/* -------------------- TUIO receiver -------------------- */
 function startTuioReceiver() {
   const udpPort = new OSC.UDPPort({
     localAddress: "0.0.0.0",
@@ -127,8 +185,8 @@ function startTuioReceiver() {
 
 /* -------------------- BrowserView helpers -------------------- */
 function openSiteView(win, url) {
-  console.log(`🔄 Main process: Opening site view for URL: ${url}`);
-  closeSiteView(win); // ensure only one
+  console.log(`🔄 Opening site view: ${url}`);
+  closeSiteView(win, { silent: true }); // ← don't emit website:closed while replacing
 
   const view = new BrowserView({
     webPreferences: {
@@ -140,159 +198,61 @@ function openSiteView(win, url) {
     }
   });
   win.setBrowserView(view);
-  console.log(`✅ Main process: BrowserView created and attached`);
-  
-  // Get window bounds and content bounds
-  const contentBounds = win.getContentBounds();
-  
-  // Use content bounds for BrowserView positioning - 80% width and height on the left
-  const { width, height } = contentBounds;
-  const browserViewWidth = Math.floor(width * 0.8); // 80% of screen width
-  const browserViewHeight = Math.floor(height * 0.8); // 80% of screen height
-  
-  // Position on the left side
-  const x = 0; // Start at left edge
-  const y = Math.floor((height - browserViewHeight) / 2); // Center vertically
-  
-  // Try a different approach - make BrowserView fill entire screen first
-  view.setAutoResize({ 
-    width: false, 
-    height: false, 
-    horizontal: false, 
-    vertical: false 
-  });
-  
-  
-  viewByWinId.set(win.id, { view, w: browserViewWidth, h: browserViewHeight });
-  view.setBounds({ x, y, width: browserViewWidth, height: browserViewHeight });
+
+  const { width, height } = win.getContentBounds();
+  const bw = Math.floor(width * 0.8);
+  const bh = Math.floor(height * 0.8);
+  const x  = 0;
+  const y  = Math.floor((height - bh) / 2);
+
+  view.setAutoResize({ width: false, height: false, horizontal: false, vertical: false });
+  viewByWinId.set(win.id, { view, w: bw, h: bh });
+  view.setBounds({ x, y, width: bw, height: bh });
   view.setAutoResize({ width: false, height: false });
 
-  // IMPORTANT: subscribe to 'did-finish-load' BEFORE navigation to avoid missing it
   view.webContents.once("did-finish-load", () => {
-    console.log('📄 Main process: Website finished loading');
-    
-    // Wait a bit for the page to fully render, then force dimensions
     setTimeout(() => {
-      console.log('🎨 Main process: Applying CSS and JavaScript to website');
-      
-      // Force the website to fill the full BrowserView height with scrolling
       view.webContents.insertCSS(`
-        body, html {
-          margin: 0 !important;
-          padding: 0 !important;
-          height: 100% !important;
-          width: 100% !important;
-          overflow: auto !important;
-          background: white !important;
-        }
-        
-        /* Hide scrollbars but keep scrolling functionality */
-        body::-webkit-scrollbar, html::-webkit-scrollbar {
-          width: 0px !important;
-          height: 0px !important;
-          background: transparent !important;
-        }
-        
-        body::-webkit-scrollbar-track, html::-webkit-scrollbar-track {
-          background: transparent !important;
-        }
-        
-        body::-webkit-scrollbar-thumb, html::-webkit-scrollbar-thumb {
-          background: transparent !important;
-        }
-        
-        /* Hide scrollbars for all elements */
-        * {
-          box-sizing: border-box !important;
-          scrollbar-width: none !important; /* Firefox */
-          -ms-overflow-style: none !important; /* IE and Edge */
-        }
-        
-        *::-webkit-scrollbar {
-          width: 0px !important;
-          height: 0px !important;
-          background: transparent !important;
-        }
-        
-        /* Force main content containers to allow scrolling */
-        .container, .main-content, .content-wrapper, 
-        .page-content, .site-content, .main-container,
-        .wrapper, .page-wrapper, .site-wrapper {
-          min-height: 100% !important;
-          overflow: auto !important;
-        }
-        
-        /* Remove any top/bottom margins that might create gaps */
-        .header, .navbar, .top-bar {
-          margin-top: 0 !important;
-        }
-        
-        .footer, .bottom-bar {
-          margin-bottom: 0 !important;
-        }
+        body, html { margin:0!important; padding:0!important; height:100%!important; width:100%!important; overflow:auto!important; background:#fff!important; }
+        body::-webkit-scrollbar, html::-webkit-scrollbar { width:0!important; height:0!important; background:transparent!important; }
+        * { box-sizing:border-box!important; scrollbar-width:none!important; -ms-overflow-style:none!important; }
+        *::-webkit-scrollbar { width:0!important; height:0!important; background:transparent!important; }
       `);
-      
-      // Also try to force dimensions via JavaScript
-      view.webContents.executeJavaScript(`
-        document.body.style.height = '100vh';
-        document.body.style.minHeight = '100vh';
-        document.body.style.maxHeight = '100vh';
-        document.documentElement.style.height = '100vh';
-        document.documentElement.style.minHeight = '100vh';
-        document.documentElement.style.maxHeight = '100vh';
-      `);
-      
-      // Wait a bit more for everything to settle, then capture and send to gradient window
-      setTimeout(() => {
-        console.log('📸 Main process: Capturing website and sending to gradient window');
-        captureAndSendToGradient(view, win);
-      }, 1000);
-      
-    }, 500);
+      // start continuous capture
+      startCapture(win);
+    }, 300);
   });
 
-  // Navigate
-  view.webContents.loadURL(url).catch(() => {
-    closeSiteView(win);
-  });
+  view.webContents.loadURL(url).catch(() => closeSiteView(win));
 }
 
-function closeSiteView(win) {
-  console.log('🔄 Main process: Closing site view...');
+function closeSiteView(win, opts = {}) {
+  const { silent = false } = opts;
+
+  // stop continuous capture (if any)
+  stopCapture?.(win);
+
+  // ALWAYS tell gradient to clear, even if no BrowserView is attached
+  if (!silent) clearGradientWindow();
+
   const rec = viewByWinId.get(win.id);
-  if (!rec) {
-    console.log('⚠️ Main process: No BrowserView found to close');
-    return;
-  }
-  
-  // Clear gradient window before closing
-  clearGradientWindow();
-  
+  if (!rec) return;
+
   try {
-    console.log('🔄 Main process: Removing BrowserView...');
     win.removeBrowserView(rec.view);
     rec.view.webContents.destroy();
-    console.log('✅ Main process: BrowserView closed successfully');
-  } catch (error) {
-    console.error('❌ Main process: Error closing BrowserView:', error);
-  }
+  } catch {}
   viewByWinId.delete(win.id);
-  console.log('🧹 Main process: BrowserView record deleted');
 }
 
 /* -------------------- IPC from renderer -------------------- */
 ipcMain.handle("open-site-view", async (evt, url) => {
-  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
-    return false;
-  }
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return false;
   const sender = BrowserWindow.fromWebContents(evt.sender);
-  if (!sender || sender.isDestroyed()) {
-    return false;
-  }
+  if (!sender || sender.isDestroyed()) return false;
   openSiteView(sender, url);
   return true;
 });
-
 ipcMain.handle("close-site-view", async (evt) => {
   const sender = BrowserWindow.fromWebContents(evt.sender);
   if (!sender || sender.isDestroyed()) return false;
@@ -300,45 +260,24 @@ ipcMain.handle("close-site-view", async (evt) => {
   return true;
 });
 
-// Legacy mirror handlers (kept for compatibility but not used)
-ipcMain.handle("mirror:start", async (_e, { rect, fps }) => {
-  console.log('⚠️ Main process: Legacy mirror:start called (not used in new system)');
-  return true;
-});
-ipcMain.handle("mirror:stop", async () => { 
-  console.log('⚠️ Main process: Legacy mirror:stop called (not used in new system)');
-  return true; 
-});
+// legacy
+ipcMain.handle("mirror:start", async () => true);
+ipcMain.handle("mirror:stop", async () => true);
 
-/* -------------------- Event-driven capture system -------------------- */
-function getGradientWindow() { return windowsByIndex.get(0); } // first display is gradient
+/* -------------------- capture -> gradient -------------------- */
+function getGradientWindow() { return windowsByIndex.get(0); }
 
-// Single capture and send to gradient window
-async function captureAndSendToGradient(srcView, win) {
+async function captureAndSendToGradient(srcView) {
   const gradientWin = getGradientWindow();
-  if (!gradientWin || gradientWin.isDestroyed()) {
-    console.log('⚠️ Main process: Gradient window not available');
-    return;
-  }
-
+  if (!gradientWin || gradientWin.isDestroyed()) return;
   try {
-    console.log('📸 Main process: Capturing website screenshot...');
     const img = await srcView.webContents.capturePage();
-    const dataUrl = img.toDataURL();
-    
-    console.log('📡 Main process: Sending screenshot to gradient window');
-    gradientWin.webContents.send("website:loaded", dataUrl);
-    console.log('✅ Main process: Screenshot sent successfully');
-  } catch (error) {
-    console.error('❌ Main process: Failed to capture/send screenshot:', error.message);
+    gradientWin.webContents.send("website:loaded", img.toDataURL());
+  } catch (e) {
+    console.error("❌ capture/send:", e.message);
   }
 }
-
-// Clear gradient window when website is closed
 function clearGradientWindow() {
   const gradientWin = getGradientWindow();
-  if (gradientWin && !gradientWin.isDestroyed()) {
-    console.log('🧹 Main process: Clearing gradient window');
-    gradientWin.webContents.send("website:closed");
-  }
+  if (gradientWin && !gradientWin.isDestroyed()) gradientWin.webContents.send("website:closed");
 }

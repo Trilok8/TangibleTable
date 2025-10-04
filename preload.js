@@ -13,7 +13,6 @@ contextBridge.exposeInMainWorld("actions", {
   closeSiteView: () => ipcRenderer.invoke("close-site-view")
 });
 
-// ---- Website Display API ----
 contextBridge.exposeInMainWorld("websiteDisplay", {
   onLoaded: (cb) => {
     const handler = (_evt, dataUrl) => cb(dataUrl);
@@ -27,7 +26,6 @@ contextBridge.exposeInMainWorld("websiteDisplay", {
   }
 });
 
-// ---- Legacy Mirror API (kept for compatibility) ----
 contextBridge.exposeInMainWorld("mirror", {
   start: (rect, fps = 15) => ipcRenderer.invoke("mirror:start", { rect, fps }),
   stop:  () => ipcRenderer.invoke("mirror:stop"),
@@ -36,4 +34,12 @@ contextBridge.exposeInMainWorld("mirror", {
     ipcRenderer.on("mirror:frame", handler);
     return () => ipcRenderer.removeListener("mirror:frame", handler);
   }
+});
+
+/* ---------- User-editable tags.json (in userData/config/tags.json) ---------- */
+contextBridge.exposeInMainWorld("config", {
+  get:        () => ipcRenderer.invoke("config:get"),
+  set:        (obj) => ipcRenderer.invoke("config:set", obj),
+  openFolder: () => ipcRenderer.invoke("config:open-folder"),
+  path:       () => ipcRenderer.invoke("config:path")
 });
