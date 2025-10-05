@@ -12,6 +12,7 @@
     body {
       margin: 0;
       height: 100vh;
+      padding: 0;
       color: #eaeaea;
       font-family: system-ui;
       overflow: hidden;
@@ -36,6 +37,26 @@
       pointer-events: none;
     }
 
+    #logo {
+      position: fixed;
+      height: 100px;
+      width: auto;
+      top: 16px;
+      left: 16px;
+      z-index: 200;
+      pointer-events: none;
+
+      /* hidden by default */
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .25s ease;
+    }
+
+    #logo.visible {
+      opacity: 1;
+      visibility: visible;
+    }
+
     /* ✨ HUD image now lives inside control panel, not fixed */
     /* EDIT */
     #hud-animation {
@@ -57,15 +78,16 @@
     /* EDIT */
 
     .main-container {
-      display: flexbox;
+      display: none;
       height: 100vh;
       width: 100vw;
       align-items: center;
-      justify-content: center;
+      /* vertical centering */
+      justify-content: space-between;
+      /* 80% + 20% = 100% */
       overflow: hidden;
       position: relative;
       z-index: 100;
-      background-color: aqua;
       margin: 0;
     }
 
@@ -95,25 +117,37 @@
       display: flex;
       flex-direction: column;
       justify-content: flex-start;
-      background: rgba(0, 122, 255, 0.25);
       padding: 20px;
       box-sizing: border-box;
       border-radius: 8px;
-      margin-left: 20px;
+      margin-left: 0;
+      /* was 20px */
       overflow: hidden;
       z-index: 101;
     }
 
     /* Buttons list */
     .buttons-container {
-      /* EDIT: let buttons take remaining space; HUD sits below */
       flex: 1 1 auto;
       min-height: 0;
       height: 60vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
       overflow-y: auto;
       margin-bottom: 12px;
       scrollbar-width: none;
       -ms-overflow-style: none;
+    }
+
+    .buttons-container::before {
+      content: "";
+      flex: 1;
+    }
+
+    .buttons-container::after {
+      content: "";
+      flex: 1;
     }
 
     .buttons-container::-webkit-scrollbar {
@@ -136,6 +170,7 @@
       width: 90%;
       height: 90px;
       padding: 0;
+      flex: 0 0 auto;
       margin: 12px auto;
       border-radius: 8px;
       cursor: pointer;
@@ -172,7 +207,6 @@
       position: absolute;
       top: 10px;
       left: 10px;
-      background: rgba(27, 30, 36, 0.8);
       padding: 6px 10px;
       border-radius: 6px;
       font-size: 12px;
@@ -243,11 +277,10 @@
   <video id="bg-video" autoplay muted loop playsinline preload="auto" webkit-playsinline>
     <source src="assets/tangible/bg.mp4" type="video/mp4">
   </video>
-
   <!-- Logo -->
   <img id="logo" src="assets/tangible/logo.png" alt="Logo">
-
   <div class="main-container">
+
     <!-- Left -->
     <div class="website-panel">
       <div class="website-placeholder"></div>
