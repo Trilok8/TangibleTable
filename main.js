@@ -6,6 +6,10 @@ import { dirname, join } from "node:path";
 import { readFile, writeFile, access, mkdir } from "node:fs/promises";
 import { constants as FS } from "node:fs";
 
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
